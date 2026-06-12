@@ -1,0 +1,39 @@
+# ============================================================
+# BFT Drone Node - Configuracion base
+# Todas las propiedades se sobreescriben con variables de entorno
+# ============================================================
+server:
+  port: ${SERVER_PORT:8080}
+
+node:
+  id: ${NODE_ID:1}           # 1=PC1, 2=PC2, 3=PC3, 4=VM traidor
+  ip: ${NODE_IP:192.168.0.101}
+  role: ${NODE_ROLE:Traidor}   # Leal o Traidor
+  port: ${SERVER_PORT:8080}
+
+# IPs y puertos de todos los nodos del cluster
+cluster:
+  nodes:
+    - id: 4
+      ip: ${NODE1_IP:192.168.0.101}
+      port: 8080
+    - id: 2
+      ip: ${NODE2_IP:192.168.0.102}
+      port: 8080
+    - id: 3
+      ip: ${NODE3_IP:192.168.0.103}
+      port: 8080
+    - id: 1
+      ip: ${NODE4_IP:192.168.0.104}
+      port: 8080
+
+# Configuracion del algoritmo Bully
+bully:
+  heartbeat-interval-ms: 3000   # cada cuanto el coordinador envia heartbeat
+  heartbeat-timeout-ms: 15000    # si no llega heartbeat en este tiempo, se inicia eleccion
+  election-timeout-ms: 5000     # tiempo maximo esperando OK en una eleccion
+
+# Configuracion BFT
+bft:
+  round-interval-ms: 8000       # cada cuanto el coordinador inicia una ronda de consenso
+  relay-timeout-ms: 3000        # tiempo esperando mensajes relay de los pares
