@@ -1,139 +1,318 @@
-# flota-drones-tolerante-fallos
+# 🚁 BFT Drone Fleet – Sistema Distribuido Tolerante a Fallos Bizantinos
 
-# BFT Drone Fleet — Spring Boot
+## 📖 Descripción
 
-## Arquitectura
-- **Spring Boot**: backend de cada nodo dron (algoritmos BFT OM-1 y Bully)
-- **Flask**: dashboard de monitoreo (siguiente fase)
-- **Cluster**: 3 PCs Linux + 1 VM VirtualBox
+**BFT Drone Fleet** es un sistema distribuido que simula una flota de drones capaces de alcanzar consenso aun en presencia de nodos maliciosos o defectuosos (fallos bizantinos).
 
-## Nodos del cluster
+El proyecto integra varios algoritmos clásicos de sistemas distribuidos:
 
-| Nodo  | IP             | ID | Rol               |
-|-------|----------------|----|-------------------|
-| VM    | 192.168.0.104  | 1  | Leal              |
-| PC2   | 192.168.0.102  | 2  | Leal              |
-| PC3   | 192.168.0.103  | 3  | Leal              |
-| PC1   | 192.168.0.101  | 4  | Coordinador/Traidor |
+* **OM(1) (Oral Messages)** de Lamport para tolerancia a fallos bizantinos.
+* **Algoritmo Bully** para elección dinámica de coordinador.
+* **Algoritmo de Cristian** para sincronización de relojes.
+* **Ricart–Agrawala** para exclusión mutua distribuida.
 
-## Compilar el proyecto (en cualquier PC con Java 17 + Maven)
+El sistema está compuesto por cuatro drones ejecutándose como procesos independientes sobre distintas máquinas de la red y un dashboard web que permite monitorear en tiempo real el estado del clúster, las elecciones de coordinador, los consensos alcanzados y los eventos distribuidos.
+
+---
+
+# 🎯 Objetivos
+
+* Simular una flota de drones distribuida.
+* Implementar consenso tolerante a fallos bizantinos.
+* Demostrar recuperación automática ante fallos del coordinador.
+* Visualizar eventos distribuidos en tiempo real.
+* Integrar múltiples algoritmos clásicos de sistemas distribuidos en una única aplicación.
+
+---
+
+# 🏗️ Arquitectura General
+
+```text
+                    ┌─────────────────────┐
+                    │   Dashboard Flask   │
+                    │  HTML/CSS/JS/STOMP  │
+                    └──────────┬──────────┘
+                               │
+                     REST + WebSocket
+                               │
+      ┌─────────────┬──────────┼──────────┬─────────────┐
+      │             │          │          │             │
+ ┌────▼────┐  ┌────▼────┐ ┌────▼────┐ ┌────▼────┐
+ │ Drone 1 │  │ Drone 2 │ │ Drone 3 │ │ Drone 4 │
+ │ Spring  │  │ Spring  │ │ Spring  │ │ Spring  │
+ │ Boot    │  │ Boot    │ │ Boot    │ │ Boot    │
+ └─────────┘  └─────────┘ └─────────┘ └─────────┘
+
+      Comunicación entre drones mediante HTTP/REST
+```
+
+---
+
+# 🧠 Algoritmos Implementados
+
+## 1. Consenso Bizantino – OM(1)
+
+El algoritmo OM(1) permite alcanzar consenso incluso cuando existe un nodo traidor dentro del sistema.
+
+### Escenario 1: Coordinador Leal y Teniente Traidor
+
+* El coordinador envía la misma orden a todos los drones.
+* El dron traidor altera los mensajes durante el reenvío.
+* Los drones leales aplican mayoría.
+* Se conserva el valor correcto.
+
+### Escenario 2: Coordinador Traidor
+
+* El coordinador envía órdenes distintas a cada teniente.
+* Los tenientes intercambian los valores recibidos.
+* Todos los drones leales aplican la misma regla de decisión.
+* Se cumple la propiedad de acuerdo (IC1).
+
+### Condición de tolerancia
+
+Para OM(1):
+
+```text
+n ≥ 3m + 1
+```
+
+donde:
+
+* n = número total de drones
+* m = número máximo de traidores
+
+En este proyecto:
+
+```text
+n = 4
+m = 1
+
+4 ≥ 4 ✓
+```
+
+---
+
+## 2. Elección de Líder – Algoritmo Bully
+
+Cuando el coordinador deja de enviar latidos (heartbeats):
+
+1. Los drones detectan el fallo.
+2. Se inicia una elección.
+3. El nodo con mayor identificador activo gana.
+4. El nuevo coordinador anuncia su liderazgo.
+
+---
+
+## 3. Sincronización de Relojes – Algoritmo de Cristian
+
+Permite reducir la deriva temporal entre los drones utilizando un servidor de tiempo distribuido.
+
+Cada nodo:
+
+1. Solicita la hora al servidor.
+2. Calcula el retardo de red.
+3. Ajusta su reloj local.
+
+---
+
+## 4. Exclusión Mutua – Ricart–Agrawala
+
+Controla el acceso concurrente a recursos compartidos mediante intercambio de mensajes REQUEST y REPLY entre los nodos.
+
+---
+
+# 🖥️ Topología del Clúster
+
+| Nodo | IP            | ID | Rol     |
+| ---- | ------------- | -- | ------- |
+| D1   | 192.168.0.104 | 1  | Leal    |
+| D2   | 192.168.0.102 | 2  | Leal    |
+| D3   | 192.168.0.103 | 3  | Leal    |
+| D4   | 192.168.0.101 | 4  | Traidor |
+
+El nodo con mayor ID es seleccionado inicialmente como coordinador mediante el algoritmo Bully.
+
+---
+
+# ⚙️ Tecnologías Utilizadas
+
+## Backend
+
+* Java 17
+* Spring Boot
+* Spring Web
+* Spring WebSocket
+* Maven
+* Lombok
+
+## Frontend
+
+* Python 3
+* Flask
+* HTML5
+* CSS3
+* JavaScript
+* Bootstrap 5
+* STOMP
+* SockJS
+
+## Infraestructura
+
+* VirtualBox
+* Red local LAN
+* 3 PCs físicas
+* 1 Máquina Virtual
+
+---
+
+# 📂 Estructura del Proyecto
+
+```text
+flota-drones-tolerante-fallos/
+│
+├── backend/
+│   ├── config/
+│   ├── controller/
+│   ├── model/
+│   ├── service/
+│   └── websocket/
+│
+├── dashboard/
+│   ├── templates/
+│   ├── static/
+│   │   ├── css/
+│   │   └── js/
+│   └── app.py
+│
+└── README.md
+```
+
+---
+
+# 🚀 Instalación
+
+## Compilar Backend
 
 ```bash
+cd backend
 mvn clean package -DskipTests
 ```
-Genera: `target/drone-1.0.0.jar`
 
-## Distribuir el JAR a todos los nodos
+Se generará:
 
-```bash
-# Desde PC1 (192.168.0.101)
-scp target/drone-1.0.0.jar ubuntu@192.168.0.102:~/
-scp target/drone-1.0.0.jar ubuntu@192.168.0.103:~/
-scp target/drone-1.0.0.jar dron4@192.168.0.104:~/
+```text
+target/drone-1.0.0.jar
 ```
 
-## Arrancar cada nodo
+---
 
-### PC1 — Dron 1 (Leal, ID=1)
+## Ejecutar los nodos
+
+### D4 – Coordinador Traidor
+
 ```bash
-NODE_ID=1 \
+NODE_ID=4 \
 NODE_IP=192.168.0.101 \
-NODE_ROLE=LEAL \   
+NODE_ROLE=TRAITOR \
 SERVER_PORT=8080 \
 java -jar drone-1.0.0.jar
 ```
 
-### PC2 — Dron 2 (Leal, ID=2)
-```bash
-NODE_ID=2 \
-NODE_IP=192.168.0.102 \
-NODE_ROLE=loyal \
-SERVER_PORT=8080 \
-java -jar drone-1.0.0.jar
-```
+### D3 – Leal
 
-### PC3 — Dron 3 (Leal, ID=3)
 ```bash
 NODE_ID=3 \
 NODE_IP=192.168.0.103 \
-NODE_ROLE=loyal \
+NODE_ROLE=LOYAL \
 SERVER_PORT=8080 \
 java -jar drone-1.0.0.jar
 ```
 
-### VM — Dron 4 (Coordinador inicial + Traidor, ID=4)
+### D2 – Leal
+
 ```bash
-NODE_ID=4 \
+NODE_ID=2 \
+NODE_IP=192.168.0.102 \
+NODE_ROLE=LOYAL \
+SERVER_PORT=8080 \
+java -jar drone-1.0.0.jar
+```
+
+### D1 – Leal
+
+```bash
+NODE_ID=1 \
 NODE_IP=192.168.0.104 \
-NODE_ROLE=traitor \
+NODE_ROLE=LOYAL \
 SERVER_PORT=8080 \
 java -jar drone-1.0.0.jar
 ```
 
-## Instalar Java 17 en cada nodo (si no está instalado)
+---
+
+# 🌐 Dashboard
+
+Instalar dependencias:
 
 ```bash
-sudo apt update
-sudo apt install openjdk-17-jdk -y
-java -version
+cd dashboard
+pip install flask requests
 ```
 
-## Endpoints disponibles en cada nodo
-
-| Método | URL                | Descripción                        |
-|--------|--------------------|------------------------------------|
-| GET    | /health            | Verificar que el nodo está vivo    |
-| GET    | /status            | Estado completo del nodo           |
-| POST   | /bft/propose       | Fase 1 BFT: propuesta del coord.   |
-| POST   | /bft/relay         | Fase 2 BFT: relay entre tenientes  |
-| POST   | /bully/election    | Mensaje ELECTION                   |
-| POST   | /bully/ok          | Mensaje OK                         |
-| POST   | /bully/coordinator | Anuncio nuevo coordinador          |
-| POST   | /bully/heartbeat   | Heartbeat del coordinador          |
-| WS     | /ws                | WebSocket para el dashboard Flask  |
-
-## Verificar que todos los nodos están corriendo
+Ejecutar:
 
 ```bash
-curl http://192.168.0.101:8080/health
-curl http://192.168.0.102:8080/health
-curl http://192.168.0.103:8080/health
-curl http://192.168.0.104:8080/health
+python app.py
 ```
 
-## Simular caída del coordinador (VM)
+Abrir:
 
-Para probar el algoritmo Bully, simplemente apaga la VM o detén el proceso:
-```bash
-# En la VM
-sudo poweroff
+```text
+http://localhost:5000
 ```
-El nodo ID=3 (PC3) detectará la caída en ~7 segundos e iniciará la elección.
-Puedes ver el proceso en los logs de PC3 o via el dashboard Flask.
 
-## Estructura del proyecto
+---
 
-```
-bft-drone/
-├── pom.xml
-└── src/main/java/com/bft/drone/
-    ├── DroneApplication.java
-    ├── config/
-    │   ├── AppConfig.java        # RestTemplate bean
-    │   ├── BullyConfig.java      # Propiedades Bully
-    │   ├── ClusterConfig.java    # Topologia del cluster
-    │   ├── NodeConfig.java       # Config del nodo actual
-    │   └── WebSocketConfig.java  # STOMP WebSocket
-    ├── controller/
-    │   ├── BftController.java    # /bft/propose, /bft/relay
-    │   ├── BullyController.java  # /bully/*
-    │   └── StatusController.java # /status, /health
-    ├── model/
-    │   ├── Messages.java         # DTOs de mensajes
-    │   └── NodeState.java        # Estado compartido del nodo
-    ├── service/
-    │   ├── BftService.java       # Algoritmo OM(1)
-    │   └── BullyService.java     # Algoritmo Bully
-    └── websocket/
-        └── EventPublisher.java   # Publicador WebSocket
-```
+# 📡 Endpoints Principales
+
+| Método | Endpoint           | Descripción             |
+| ------ | ------------------ | ----------------------- |
+| GET    | /health            | Estado del nodo         |
+| GET    | /status            | Estado completo         |
+| POST   | /bft/propose       | Fase de propuesta       |
+| POST   | /bft/relay         | Reenvío entre tenientes |
+| POST   | /bully/election    | Inicio de elección      |
+| POST   | /bully/coordinator | Anuncio coordinador     |
+| POST   | /bully/heartbeat   | Latido del líder        |
+| GET    | /cristian/time     | Hora del servidor       |
+| GET    | /cristian/status   | Estado sincronización   |
+| GET    | /me/status         | Estado Ricart-Agrawala  |
+| WS     | /ws                | Eventos en tiempo real  |
+
+---
+
+# 🧪 Escenarios de Prueba
+
+## Fallo del Coordinador
+
+1. Detener el coordinador actual.
+2. Esperar aproximadamente 7 segundos.
+3. Los drones iniciarán una elección Bully.
+4. El nodo activo con mayor ID será elegido coordinador.
+
+## Coordinador Traidor
+
+1. D4 envía trayectorias distintas.
+2. Los tenientes intercambian mensajes.
+3. Todos alcanzan el mismo consenso.
+4. Se verifica IC(1).
+
+## Teniente Traidor
+
+1. Un coordinador leal envía la misma orden.
+2. El teniente traidor modifica mensajes.
+3. Los drones leales aplican mayoría.
+4. Se preserva el valor correcto.
+
+---
+

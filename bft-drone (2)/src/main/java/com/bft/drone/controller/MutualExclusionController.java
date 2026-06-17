@@ -1,5 +1,6 @@
 package com.bft.drone.controller;
 
+import com.bft.drone.config.NodeConfig;
 import com.bft.drone.service.MutualExclusionService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -18,6 +19,7 @@ import java.util.Map;
 public class MutualExclusionController {
 
     private final MutualExclusionService mutualExclusionService;
+    private final NodeConfig nodeConfig;
 
     @PostMapping("/request")
     public ResponseEntity<Void> request(@RequestBody Map<String, Object> body) {
@@ -33,4 +35,17 @@ public class MutualExclusionController {
         mutualExclusionService.receiveReply(fromNodeId);
         return ResponseEntity.ok().build();
     }
+
+    @GetMapping("/status")
+    public ResponseEntity<Map<String, Object>> status() {
+    return ResponseEntity.ok(Map.of(
+        "nodeId",        nodeConfig.getId(),
+        "state",         mutualExclusionService.getState(),          // "RELEASED" | "WANTING" | "HELD"
+        "lamportClock",  mutualExclusionService.getLamportClock(),
+        "pendingReplies", mutualExclusionService.getPendingReplies(), // List<Integer>
+        "deferredQueue", mutualExclusionService.getDeferredQueue()    // List<Integer>
+    ));
+}
+
+    
 }

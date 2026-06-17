@@ -34,6 +34,7 @@ public class MutualExclusionService {
     private final NodeState nodeState;
     private final EventPublisher eventPublisher;
     private final RestTemplate restTemplate;
+    
 
     // Reloj lógico de Lamport
     private final AtomicInteger lamportClock = new AtomicInteger(0);
@@ -53,6 +54,22 @@ public class MutualExclusionService {
 
     // Semáforo para bloquear hasta tener todos los OK
     private final Semaphore accessGranted = new Semaphore(0);
+
+    public String getState() {
+        return state.name();  // ya es un enum: RELEASED, WANTING, HELD
+    }
+ 
+    public int getLamportClock() {
+        return lamportClock.get();
+    }
+ 
+    public List<Integer> getPendingReplies() {
+        return new ArrayList<>(pendingReplies);
+    }
+ 
+    public List<Integer> getDeferredQueue() {
+        return new ArrayList<>(deferredQueue);
+    }
 
     // ── API pública ──────────────────────────────────────────────────────
 

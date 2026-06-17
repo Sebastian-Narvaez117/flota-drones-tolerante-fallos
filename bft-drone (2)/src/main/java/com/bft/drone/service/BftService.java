@@ -31,13 +31,14 @@ public class BftService {
             "NORTE:60,OESTE:20",
             "ESTE:120,SUR:40"
     );
-    private final ConcurrentHashMap<Integer, String> roundCoordinatorValue = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<Integer, Map<Integer, String>> roundPeerValues = new ConcurrentHashMap<>();
 
+    // Almacenamiento por ronda
+    private final Map<Integer, String> roundCoordinatorValue = new ConcurrentHashMap<>();
+    private final Map<Integer, Map<Integer, String>> roundPeerValues = new ConcurrentHashMap<>();
 
-    // Estado local de la ronda actual
-    private String coordinatorValue;
-    private final Map<Integer, String> peerValues = new HashMap<>();
+    // ================================================================
+    // El coordinador inicia una ronda
+    // ================================================================
 
     @Scheduled(fixedDelayString = "${bft.round-interval-ms:8000}")
     public void startRoundIfCoordinator() {
@@ -48,7 +49,11 @@ public class BftService {
         log.info("=== Ronda BFT {} iniciada (coordinador {}) ===", round, nodeConfig.getId());
         nodeState.logEvent("BFT RONDA " + round + " iniciada por coordinador " + nodeConfig.getId());
 
-        // Fase 1: enviar PROPOSE a todos los tenientes
+        // Guardar el valor que el coordinador propone (incluso si es traidor, usa el valor de la ronda)
+        roundCoordinatorValue.put(round, truePath);
+        roundPeerValues.put(round, new ConcurrentHashMap<>());
+
+        // Fase 1: enviar PROPUESTA a todos los demás nodos
         for (ClusterConfig.NodeInfo node : clusterConfig.getOtherNodes(nodeConfig.getId())) {
             String trajectory = nodeConfig.isTraitor()
                     ? fakeTrajectoryFor(node.getId(), round)
@@ -56,62 +61,115 @@ public class BftService {
             sendProposeTo(node, round, trajectory);
         }
 
-        // El coordinador también guarda su propio valor verdadero
-        coordinatorValue = truePath;
+        // El coordinador NO reenvía. Solo registrará su propia decisión
+        // (basada en el valor que él mismo propuso, aunque sea traidor)
+        nodeState.recordDecision(round, truePath);
+        nodeState.logEvent("DECISION ronda " + round + ": " + truePath + " (coordinador)");
+        eventPublisher.bftDecision(round, truePath);
+
+        // Limpia los mensajes relay del estado (no se usan ya)
         nodeState.clearRelayMessages();
-        peerValues.clear();
     }
 
-    // ---------- Fase 1: recepción de PROPOSE ----------
+    // ================================================================
+    // Fase 1: un teniente recibe PROPUESTA del coordinador
+    // ================================================================
+
     public void receivePropose(int fromNodeId, int round, String trajectory) {
-        
-        nodeState.setCurrentRound(round);
-        coordinatorValue = trajectory;
-        roundPeerValues.put(round, new ConcurrentHashMap<>());
-        peerValues.clear();
-        nodeState.logEvent("PROPUESTA ronda " + round + ": " + trajectory);
-        eventPublisher.bftPropose(round, trajectory);
+    log.info("[NODO {}] 📥 PROPUESTA recibida ronda {} de nodo {}: '{}'",
+            nodeConfig.getId(), round, fromNodeId, trajectory);
 
-        // Fase 2: reenviar a los otros tenientes (no al coordinador ni a sí mismo)
-        clusterConfig.getOtherNodes(nodeConfig.getId()).stream()
-                .filter(n -> n.getId() != fromNodeId)
-                .forEach(n -> {
-                    String relayValue = nodeConfig.isTraitor()
-                            ? fakeTrajectoryFor(n.getId(), round)
-                            : trajectory;
-                    sendRelayTo(n, round, relayValue);
-                });
+    nodeState.setCurrentRound(round);
+    roundCoordinatorValue.put(round, trajectory);
+    roundPeerValues.put(round, new ConcurrentHashMap<>());
+
+    nodeState.logEvent("PROPUESTA ronda " + round + ": " + trajectory);
+    eventPublisher.bftPropose(round, trajectory);
+
+    // Reenviar a los otros tenientes
+    List<ClusterConfig.NodeInfo> others = clusterConfig.getOtherNodes(nodeConfig.getId()).stream()
+            .filter(n -> n.getId() != fromNodeId)
+            .collect(Collectors.toList());
+
+    log.info("[NODO {}] 🔄 Reenviando PROPUESTA a {} tenientes: {}",
+            nodeConfig.getId(), others.size(),
+            others.stream().map(n -> "D" + n.getId()).collect(Collectors.toList()));
+
+    for (ClusterConfig.NodeInfo n : others) {
+        String relayValue = nodeConfig.isTraitor()
+                ? fakeTrajectoryFor(n.getId(), round)
+                : trajectory;
+        sendRelayTo(n, round, relayValue);
     }
 
-    // ---------- Fase 2: recepción de RELAY ----------
+    // Log del estado después de reenviar
+    log.info("[NODO {}] 📊 Estado ronda {}: coordValue={}, peers actuales={}",
+            nodeConfig.getId(), round,
+            roundCoordinatorValue.get(round),
+            roundPeerValues.get(round).size());
+}
+
+    // ================================================================
+    // Fase 2: un teniente recibe un REENVÍO de otro teniente
+    // ================================================================
+
     public void receiveRelay(int fromNodeId, int round, String trajectory) {
-        roundPeerValues.computeIfAbsent(round, k -> new ConcurrentHashMap<>())
-                   .put(fromNodeId, trajectory);
-        nodeState.logEvent("REENVIO ronda " + round + " de nodo " + fromNodeId + ": " + trajectory);
-        eventPublisher.bftRelay(round, fromNodeId, trajectory);
+    Map<Integer, String> peers = roundPeerValues.computeIfAbsent(round, k -> new ConcurrentHashMap<>());
+    peers.put(fromNodeId, trajectory);
 
-        int expectedRelays = clusterConfig.getNodes().size() - 2; // total - coordinador - yo
-        if (roundPeerValues.size() >= expectedRelays) {
-            decide(round);
-        }
+    int currentPeers = peers.size();
+    int expected = clusterConfig.getNodes().size() - 2;
+    String coordVal = roundCoordinatorValue.get(round);
+
+    log.info("[NODO {}] 📥 REENVÍO ronda {} de D{}: '{}' (peers={}/{}, coordPresente={})",
+            nodeConfig.getId(), round, fromNodeId, trajectory,
+            currentPeers, expected, coordVal != null);
+
+    nodeState.logEvent("REENVIO ronda " + round + " de nodo " + fromNodeId + ": " + trajectory);
+    eventPublisher.bftRelay(round, fromNodeId, trajectory);
+
+    if (coordVal != null && currentPeers >= expected) {
+        log.info("[NODO {}] 🎯 Disparando DECISIÓN ronda {} (peers={}, coordVal='{}')",
+                nodeConfig.getId(), round, currentPeers, coordVal);
+        decide(round);
+    } else {
+        log.info("[NODO {}] ⏳ Aún no decide ronda {}: falta {}",
+                nodeConfig.getId(), round,
+                (coordVal == null ? "propuesta del coordinador" : "") +
+                (currentPeers < expected ? " " + (expected - currentPeers) + " reenvíos" : ""));
+    }
+}
+
+    // ================================================================
+    // Fase 3: decidir por mayoría (con tie-breaker determinista)
+    // ================================================================
+
+    private synchronized void decide(int round) {
+    if (!roundCoordinatorValue.containsKey(round)) {
+        log.warn("[NODO {}] ⚠️ Intento de decidir ronda {} ya decidida (concurrente)", nodeConfig.getId(), round);
+        return;
     }
 
-    // ---------- Fase 3: decisión por mayoría ----------
-    private void decide(int round) {
-        List<String> allValues = new ArrayList<>();
-        String coordVal = roundCoordinatorValue.get(round);
-        if (coordVal != null) allValues.add(coordVal);
-        Map<Integer, String> peers = roundPeerValues.getOrDefault(round, Map.of());
-        allValues.addAll(peers.values());
-        roundCoordinatorValue.remove(round);
-        roundPeerValues.remove(round);
-        String decision = majorityVote(allValues);
-        nodeState.recordDecision(round, decision);
-        nodeState.logEvent("DECISION ronda " + round + ": " + decision + " (valores: " + allValues + ")");
-        eventPublisher.bftDecision(round, decision);
-    }
+    List<String> allValues = new ArrayList<>();
+    allValues.add(roundCoordinatorValue.get(round));
+    allValues.addAll(roundPeerValues.getOrDefault(round, Map.of()).values());
 
-    // ---------- Métodos auxiliares ----------
+    String decision = majorityVote(allValues);
+    log.info("[NODO {}] 🏁 DECISIÓN ronda {} = '{}' (valores: {})",
+            nodeConfig.getId(), round, decision, allValues);
+
+    nodeState.recordDecision(round, decision);
+    nodeState.logEvent("DECISION ronda " + round + ": " + decision + " (valores: " + allValues + ")");
+    eventPublisher.bftDecision(round, decision);
+
+    roundCoordinatorValue.remove(round);
+    roundPeerValues.remove(round);
+}
+
+    // ================================================================
+    // Métodos auxiliares
+    // ================================================================
+
     private boolean isCoordinator() {
         return nodeConfig.getId() == nodeState.getCoordinatorId();
     }
@@ -153,12 +211,32 @@ public class BftService {
         }
     }
 
+    /**
+     * Votación por mayoría. Si hay empate, se elige el valor
+     * lexicográficamente menor para garantizar que todos los nodos
+     * decidan lo mismo.
+     */
     private String majorityVote(List<String> values) {
-        return values.stream()
-                .collect(Collectors.groupingBy(v -> v, Collectors.counting()))
-                .entrySet().stream()
-                .max(Map.Entry.comparingByValue())
+        if (values.isEmpty()) return "DESCONOCIDO";
+
+        // Contar ocurrencias
+        Map<String, Long> counts = values.stream()
+                .collect(Collectors.groupingBy(v -> v, Collectors.counting()));
+
+        // Encontrar el máximo número de ocurrencias
+        long maxCount = counts.values().stream()
+                .mapToLong(Long::longValue)
+                .max()
+                .orElse(0);
+
+        // Tomar todos los que empatan en el máximo
+        List<String> topValues = counts.entrySet().stream()
+                .filter(e -> e.getValue() == maxCount)
                 .map(Map.Entry::getKey)
-                .orElse("DESCONOCIDO");
+                .sorted()   // orden alfabético determinista
+                .collect(Collectors.toList());
+
+        // Devolver el primero (será el menor lexicográficamente)
+        return topValues.get(0);
     }
 }

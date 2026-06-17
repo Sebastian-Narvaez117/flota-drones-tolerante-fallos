@@ -13,18 +13,6 @@ import org.springframework.web.client.RestTemplate;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * Implementación del Algoritmo de Cristian para sincronización de relojes.
- *
- * Funcionamiento:
- *  1. El cliente envía una petición al servidor de tiempo (coordinador) en t0.
- *  2. El servidor responde con su tiempo actual Ts.
- *  3. El cliente recibe la respuesta en t1.
- *  4. El cliente ajusta su reloj: T_local = Ts + (t1 - t0) / 2
- *     (se asume que el tiempo de ida es igual al de vuelta).
- *
- * El offset calculado se aplica como corrección sobre System.currentTimeMillis().
- */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -42,6 +30,7 @@ public class CristianService {
      * clockOffset < 0 → nuestro reloj va adelantado.
      */
     private final AtomicLong clockOffset = new AtomicLong(0);
+    private final AtomicLong lastRttMs = new AtomicLong(-1);
 
     /**
      * Tiempo local corregido (usa el offset calculado).
@@ -50,15 +39,20 @@ public class CristianService {
         return System.currentTimeMillis() + clockOffset.get();
     }
 
-    /**
-     * Cada 10 segundos, los nodos no-coordinadores sincronizan su reloj
-     * contra el coordinador actual usando el algoritmo de Cristian.
-     */
+    /** Retorna el offset actual, o 0 si nunca se sincronizó */
+    public long getClockOffset() {
+        return clockOffset.get();
+    }
+
+    /** Retorna el último RTT medido, o -1 si nunca hubo sincronización */
+    public long getLastRtt() {
+        return lastRttMs.get();
+    }
+
     @Scheduled(fixedDelay = 10_000L, initialDelay = 5000L)
     public void synchronizeClockWithCoordinator() {
-        // El coordinador es la fuente de tiempo, no se sincroniza a sí mismo
         if (nodeConfig.getId() == nodeState.getCoordinatorId()) return;
-        if (nodeState.getCoordinatorId() == -1) return; // sin coordinador aún
+        if (nodeState.getCoordinatorId() == -1) return;
 
         try {
             ClusterConfig.NodeInfo coordinator =
@@ -78,11 +72,12 @@ public class CristianService {
             }
 
             long serverTime = ((Number) response.get("serverTime")).longValue();
-            long rtt = t1 - t0;                    // Round-Trip Time
+            long rtt = t1 - t0;
             long estimatedServerTimeNow = serverTime + rtt / 2;
             long newOffset = estimatedServerTimeNow - t1;
 
             clockOffset.set(newOffset);
+            lastRttMs.set(rtt);
 
             log.info("Cristian sync → RTT={}ms, offset={}ms, hora_sync={}",
                     rtt, newOffset, estimatedServerTimeNow);

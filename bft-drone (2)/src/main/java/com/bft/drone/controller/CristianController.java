@@ -7,13 +7,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.Map;
 
-/**
- * Endpoints del Algoritmo de Cristian.
- * GET /cristian/time  → servidor de tiempo (solo el coordinador responde significativamente)
- * GET /cristian/status → estado de sincronización del nodo
- */
 @RestController
 @RequestMapping("/cristian")
 @RequiredArgsConstructor
@@ -23,10 +19,6 @@ public class CristianController {
     private final NodeState nodeState;
     private final CristianService cristianService;
 
-    /**
-     * Servidor de tiempo: responde con el timestamp actual.
-     * Cualquier nodo puede responder, pero los clientes solo consultan al coordinador.
-     */
     @GetMapping("/time")
     public ResponseEntity<Map<String, Object>> getServerTime() {
         return ResponseEntity.ok(Map.of(
@@ -36,16 +28,20 @@ public class CristianController {
         ));
     }
 
-    /**
-     * Estado de sincronización local: cuánto vale el offset calculado por Cristian.
-     */
     @GetMapping("/status")
     public ResponseEntity<Map<String, Object>> getSyncStatus() {
-        return ResponseEntity.ok(Map.of(
-                "nodeId",          nodeConfig.getId(),
-                "synchronizedTime", cristianService.getSynchronizedTime(),
-                "systemTime",      System.currentTimeMillis(),
-                "coordinatorId",   nodeState.getCoordinatorId()
-        ));
+        long lastRtt = cristianService.getLastRtt();
+        long clockOffset = cristianService.getClockOffset();   // Asegúrate de tener este método en CristianService
+
+        // HashMap permite null, Map.of no
+        Map<String, Object> status = new HashMap<>();
+        status.put("nodeId",          nodeConfig.getId());
+        status.put("synchronizedTime", cristianService.getSynchronizedTime());
+        status.put("systemTime",       System.currentTimeMillis());
+        status.put("coordinatorId",    nodeState.getCoordinatorId());
+        status.put("lastRtt",          lastRtt >= 0 ? lastRtt : null);   // ahora null es válido
+        status.put("clockOffset",      clockOffset);
+
+        return ResponseEntity.ok(status);
     }
 }
